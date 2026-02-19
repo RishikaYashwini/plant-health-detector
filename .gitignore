@@ -1,0 +1,15 @@
+# Ignore dataset
+dataset/
+
+# Ignore virtual environment
+plant-env/
+
+# Ignore notebooks
+notebooks/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temp files
+temp.jpg
