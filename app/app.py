@@ -9,7 +9,7 @@ from tensorflow.keras.preprocessing import image
 import cv2
 import seaborn as sns
 
-sys.path.append("../src")
+sys.path.append(os.path.abspath("src"))
 from predict import predict_image
 
 st.set_page_config(page_title="AI Plant Doctor", layout="wide")
@@ -24,7 +24,7 @@ st.sidebar.title("🧠 AI Control Panel")
 st.sidebar.header("📊 Model Status")
 
 try:
-    with open("../model/metrics.json") as f:
+    with open("model/metrics.json") as f:
         metrics = json.load(f)
         st.sidebar.metric("AI Reliability Score", f"{metrics.get('val_acc',0)*100:.2f}%")
 except:
@@ -44,9 +44,9 @@ st.sidebar.header("📈 Evaluation")
 show_confusion = st.sidebar.checkbox("Show Confusion Matrix", value=True)
 
 # Load model
-model = tf.keras.models.load_model("../model/plant_model.h5", compile=False)
+model = tf.keras.models.load_model("model/plant_model.h5", compile=False)
 
-with open("../model/class_indices.json") as f:
+with open("model/class_indices.json") as f:
     class_indices = json.load(f)
 
 idx_to_class = {v:k for k,v in class_indices.items()}
@@ -162,7 +162,7 @@ The brighter the square, the more samples.
 
 if show_confusion:
     try:
-        cm = np.load("../model/confusion_matrix.npy")
+        cm = np.load("model/confusion_matrix.npy")
 
         class_names = list(class_indices.keys())
 

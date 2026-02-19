@@ -15,11 +15,11 @@ def focal_loss(gamma=2., alpha=.25):
 
 # Load model with custom loss
 model = tf.keras.models.load_model(
-    "../model/plant_model.h5",
+    "model/plant_model.h5",
     custom_objects={'loss': focal_loss()}
 )
 
-with open("../model/class_indices.json") as f:
+with open("model/class_indices.json") as f:
     class_indices = json.load(f)
 
 idx_to_class = {v: k for k, v in class_indices.items()}
