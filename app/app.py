@@ -61,10 +61,15 @@ idx_to_class = {v:k for k,v in class_indices.items()}
 def gradcam(img_path):
 
     img = image.load_img(img_path, target_size=(160,160))
-    img_array = image.img_to_array(img)/255.0
+    img_array = image.img_to_array(img) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
 
-    last_conv_layer = model.get_layer("Conv_1")
+    # Get last conv layer dynamically
+    last_conv_layer = None
+    for layer in reversed(model.layers):
+        if isinstance(layer, tf.keras.layers.Conv2D):
+            last_conv_layer = layer
+            break
 
     grad_model = tf.keras.models.Model(
         inputs=model.inputs,
@@ -78,21 +83,19 @@ def gradcam(img_path):
 
     grads = tape.gradient(loss, conv_outputs)
 
-    # Normalize gradients
-    grads = grads / (tf.reduce_mean(tf.abs(grads)) + 1e-8)
-
+    # Global average pooling
     pooled_grads = tf.reduce_mean(grads, axis=(0,1,2))
 
     conv_outputs = conv_outputs[0]
 
     heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
 
+    # Apply ReLU
     heatmap = np.maximum(heatmap, 0)
 
-    heatmap /= (np.max(heatmap) + 1e-8)
-
-    # Smooth heatmap
-    heatmap = cv2.GaussianBlur(heatmap, (15,15), 0)
+    # Normalize properly
+    if np.max(heatmap) != 0:
+        heatmap = heatmap / np.max(heatmap)
 
     return heatmap
 
@@ -166,17 +169,13 @@ if uploaded and show_heatmap:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
     heatmap_resized = cv2.resize(heatmap, (original.shape[1], original.shape[0]))
+    heatmap_resized[heatmap_resized < 0.4] = 0  # Threshold to focus on strong signals
+    
+    heatmap_uint8 = np.uint8(255 * heatmap_resized)
 
-    heatmap_colored = cv2.applyColorMap(
-        np.uint8(255 * heatmap_resized),
-        cv2.COLORMAP_JET
-    )
+    heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
 
-    overlay = cv2.addWeighted(
-        original, 0.6,
-        heatmap_colored, opacity,
-        0
-    )
+    overlay = cv2.addWeighted(original, 0.7, heatmap_colored, 0.3, 0)
 
     st.image(overlay, caption="AI Highlighted Disease Region")
 
