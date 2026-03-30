@@ -61,15 +61,11 @@ idx_to_class = {v:k for k,v in class_indices.items()}
 def gradcam(img_path):
 
     img = image.load_img(img_path, target_size=(160,160))
-    img_array = image.img_to_array(img) / 255.0
+    img_array = image.img_to_array(img)/255.0
     img_array = np.expand_dims(img_array, axis=0)
 
-    # Get last conv layer
-    last_conv_layer = None
-    for layer in reversed(model.layers):
-        if isinstance(layer, tf.keras.layers.Conv2D):
-            last_conv_layer = layer
-            break
+    # Use fixed layer (works better visually)
+    last_conv_layer = model.get_layer("Conv_1")
 
     grad_model = tf.keras.models.Model(
         inputs=model.inputs,
@@ -78,21 +74,16 @@ def gradcam(img_path):
 
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
-        class_idx = tf.argmax(predictions[0])
+        class_idx = np.argmax(predictions[0])
         loss = predictions[:, class_idx]
 
-    grads = tape.gradient(loss, conv_outputs)[0]
+    grads = tape.gradient(loss, conv_outputs)
+
+    pooled_grads = tf.reduce_mean(grads, axis=(0,1,2))
     conv_outputs = conv_outputs[0]
 
-    # Grad-CAM++ weights
-    numerator = grads ** 2
-    denominator = 2 * grads ** 2 + np.sum(conv_outputs * grads ** 3, axis=(0,1), keepdims=True)
-    denominator = np.where(denominator != 0, denominator, 1e-8)
-
-    alphas = numerator / denominator
-    weights = np.sum(alphas * np.maximum(grads, 0), axis=(0,1))
-
-    heatmap = np.sum(weights * conv_outputs, axis=-1)
+    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
 
     heatmap = np.maximum(heatmap, 0)
 
@@ -171,15 +162,17 @@ if uploaded and show_heatmap:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
     heatmap_resized = cv2.resize(heatmap, (original.shape[1], original.shape[0]))
-    heatmap_resized[heatmap_resized < 0.5] = 0  # Threshold to focus on strong signals
+    heatmap_resized[heatmap_resized < 0.3] = 0
 
-    heatmap_uint8 = np.uint8(255 * heatmap_resized)
+    heatmap_colored = cv2.applyColorMap(
+        np.uint8(255 * heatmap_resized),
+        cv2.COLORMAP_JET
+    )
 
-    heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
+    # Use opacity slider properly
+    overlay = heatmap_colored * opacity + original
 
-    overlay = cv2.addWeighted(original, 0.75, heatmap_colored, 0.25, 0)
-
-    st.image(overlay, caption="AI Highlighted Disease Region")
+    st.image(overlay.astype(np.uint8), caption="AI Focus Area")
 
 # ---------- Confusion Matrix ----------
 st.markdown("---")
