@@ -64,7 +64,7 @@ def gradcam(img_path):
     img_array = image.img_to_array(img) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
 
-    # Get last conv layer dynamically
+    # Get last conv layer
     last_conv_layer = None
     for layer in reversed(model.layers):
         if isinstance(layer, tf.keras.layers.Conv2D):
@@ -81,21 +81,23 @@ def gradcam(img_path):
         class_idx = tf.argmax(predictions[0])
         loss = predictions[:, class_idx]
 
-    grads = tape.gradient(loss, conv_outputs)
-
-    # Global average pooling
-    pooled_grads = tf.reduce_mean(grads, axis=(0,1,2))
-
+    grads = tape.gradient(loss, conv_outputs)[0]
     conv_outputs = conv_outputs[0]
 
-    heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
+    # Grad-CAM++ weights
+    numerator = grads ** 2
+    denominator = 2 * grads ** 2 + np.sum(conv_outputs * grads ** 3, axis=(0,1), keepdims=True)
+    denominator = np.where(denominator != 0, denominator, 1e-8)
 
-    # Apply ReLU
+    alphas = numerator / denominator
+    weights = np.sum(alphas * np.maximum(grads, 0), axis=(0,1))
+
+    heatmap = np.sum(weights * conv_outputs, axis=-1)
+
     heatmap = np.maximum(heatmap, 0)
 
-    # Normalize properly
     if np.max(heatmap) != 0:
-        heatmap = heatmap / np.max(heatmap)
+        heatmap /= np.max(heatmap)
 
     return heatmap
 
@@ -169,13 +171,13 @@ if uploaded and show_heatmap:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
     heatmap_resized = cv2.resize(heatmap, (original.shape[1], original.shape[0]))
-    heatmap_resized[heatmap_resized < 0.4] = 0  # Threshold to focus on strong signals
-    
+    heatmap_resized[heatmap_resized < 0.5] = 0  # Threshold to focus on strong signals
+
     heatmap_uint8 = np.uint8(255 * heatmap_resized)
 
     heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
 
-    overlay = cv2.addWeighted(original, 0.7, heatmap_colored, 0.3, 0)
+    overlay = cv2.addWeighted(original, 0.75, heatmap_colored, 0.25, 0)
 
     st.image(overlay, caption="AI Highlighted Disease Region")
 
