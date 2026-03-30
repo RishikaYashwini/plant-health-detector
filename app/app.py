@@ -14,15 +14,21 @@ from predict import predict_image
 
 st.set_page_config(page_title="AI Plant Doctor", layout="wide")
 
+# ---------- PREMIUM HEADER ----------
+st.markdown("""
+<div style="background-color:#1f2937;padding:15px;border-radius:10px">
+<h2 style="color:white;">🌱 Smart Crop Health Analyzer</h2>
+<p style="color:white;">AI-powered plant disease detection with explainable insights</p>
+</div>
+""", unsafe_allow_html=True)
+
 st.title("🌿 AI Plant Doctor — Intelligent Diagnosis")
 
 # ---------- Sidebar Smart Controls ----------
-
 st.sidebar.title("🧠 AI Control Panel")
 
 # Model Status
 st.sidebar.header("📊 Model Status")
-
 try:
     with open("model/metrics.json") as f:
         metrics = json.load(f)
@@ -51,7 +57,7 @@ with open("model/class_indices.json") as f:
 
 idx_to_class = {v:k for k,v in class_indices.items()}
 
-# ---------- GradCAM ----------
+# ---------- IMPROVED GradCAM ----------
 def gradcam(img_path):
 
     img = image.load_img(img_path, target_size=(160,160))
@@ -67,19 +73,26 @@ def gradcam(img_path):
 
     with tf.GradientTape() as tape:
         conv_outputs, predictions = grad_model(img_array)
-        class_idx = np.argmax(predictions[0])
+        class_idx = tf.argmax(predictions[0])
         loss = predictions[:, class_idx]
 
     grads = tape.gradient(loss, conv_outputs)
 
+    # Normalize gradients
+    grads = grads / (tf.reduce_mean(tf.abs(grads)) + 1e-8)
+
     pooled_grads = tf.reduce_mean(grads, axis=(0,1,2))
+
     conv_outputs = conv_outputs[0]
 
-    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
+    heatmap = tf.reduce_sum(conv_outputs * pooled_grads, axis=-1)
 
     heatmap = np.maximum(heatmap, 0)
-    heatmap /= np.max(heatmap) + 1e-8
+
+    heatmap /= (np.max(heatmap) + 1e-8)
+
+    # Smooth heatmap
+    heatmap = cv2.GaussianBlur(heatmap, (15,15), 0)
 
     return heatmap
 
@@ -102,14 +115,23 @@ if uploaded:
     col1,col2 = st.columns([1,1])
 
     with col1:
-        st.image("temp.jpg", use_container_width=True)
+        st.image("temp.jpg", caption="Uploaded Leaf", use_container_width=True)
 
     with col2:
         label, confidence = predict_image("temp.jpg")
 
-        st.subheader("Diagnosis")
-        st.success(label)
-        st.write(f"Confidence: {confidence*100:.2f}%")
+        st.markdown("### 🧠 Diagnosis Result")
+
+        st.metric("Detected Condition", label.replace("_", " "))
+        st.metric("Confidence", f"{confidence*100:.2f}%")
+
+        # Confidence indicator
+        if confidence > 0.85:
+            st.success("🟢 High confidence prediction")
+        elif confidence > 0.65:
+            st.warning("🟡 Moderate confidence")
+        else:
+            st.error("🔴 Low confidence — verify manually")
 
         if "healthy" in label.lower():
             if farmer_mode:
@@ -117,22 +139,22 @@ if uploaded:
             else:
                 st.success("Plant appears healthy.")
         else:
-            st.error("Disease detected")
+            st.error("⚠️ Disease detected")
 
             for key in treatment_db:
                 if key in label.lower():
                     treat, prevent = treatment_db[key]
 
-                    st.subheader("Suggested Treatment")
+                    st.subheader("💊 Suggested Treatment")
                     st.write(treat)
 
-                    st.subheader("Preventive Measures")
+                    st.subheader("🛡 Preventive Measures")
                     st.write(prevent)
 
                     if farmer_mode:
                         st.info("👉 Treat early to avoid crop loss.")
 
-# ---------- Interactive Heatmap ----------
+# ---------- Enhanced Heatmap ----------
 st.markdown("---")
 st.subheader("🔥 Disease Heatmap")
 
@@ -144,11 +166,19 @@ if uploaded and show_heatmap:
     original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
     heatmap_resized = cv2.resize(heatmap, (original.shape[1], original.shape[0]))
-    heatmap_colored = cv2.applyColorMap(np.uint8(255*heatmap_resized), cv2.COLORMAP_JET)
 
-    overlay = heatmap_colored * opacity + original
+    heatmap_colored = cv2.applyColorMap(
+        np.uint8(255 * heatmap_resized),
+        cv2.COLORMAP_JET
+    )
 
-    st.image(overlay.astype(np.uint8), caption="AI Focus Area")
+    overlay = cv2.addWeighted(
+        original, 0.6,
+        heatmap_colored, opacity,
+        0
+    )
+
+    st.image(overlay, caption="AI Highlighted Disease Region")
 
 # ---------- Confusion Matrix ----------
 st.markdown("---")
@@ -166,9 +196,7 @@ if show_confusion:
 
         class_names = list(class_indices.keys())
 
-        # Calculate overall accuracy
         accuracy = np.trace(cm) / np.sum(cm)
-
         st.subheader(f"✅ Overall Accuracy: {accuracy*100:.2f}%")
 
         fig, ax = plt.subplots(figsize=(10,8))
@@ -188,35 +216,6 @@ if show_confusion:
         plt.yticks(rotation=0)
 
         st.pyplot(fig)
-
-        st.info("""
-    📘 What this means:
-
-    If most color is along the diagonal line, the AI is performing well.
-    Small off-diagonal spots show rare mistakes.
-    """)
-
-        # Find most confused pairs
-        off_diag = cm.copy()
-        np.fill_diagonal(off_diag, 0)
-
-        idx = np.unravel_index(np.argmax(off_diag), off_diag.shape)
-
-        if off_diag[idx] > 0:
-            confused_pair = (
-                class_names[idx[0]],
-                class_names[idx[1]]
-            )
-
-            st.warning(f"""
-    ⚠️ The AI sometimes confuses:
-
-    • {confused_pair[0]}  
-    with  
-    • {confused_pair[1]}
-
-    This happens because symptoms look similar.
-    """)
 
     except:
         st.error("Confusion matrix not available — run evaluation script.")
